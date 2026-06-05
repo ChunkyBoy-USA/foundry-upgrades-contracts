@@ -2,3 +2,78 @@
 
 pragma solidity ^0.8.24;
 
+import { Proxy } from "lib/openzeppelin-contracts/contracts/proxy/Proxy.sol";
+
+contract SmallProxy is Proxy {
+    // This is the keccak-256 hash of "eip1967.proxy.implementation" subtracted by 1
+    bytes32 constant private _IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+
+    function setImplementation(address newImplementation) public {
+        assembly {
+            sstore(_IMPLEMENTATION_SLOT, newImplementation)
+        }
+    }
+
+    function _implementation() internal view override returns (address implementationAddress) {
+        assembly {
+            implementationAddress := sload(_IMPLEMENTATION_SLOT)
+        }
+    }
+
+    function getDataToTransact(uint256 numberToUpdate) public pure returns (bytes memory) {
+        return abi.encodeWithSignature("setValue(uint256)", numberToUpdate);
+    }
+
+    function readStorage() public view returns (uint256 valueAtStorageSlotZero) {
+        assembly {
+            valueAtStorageSlotZero := sload(0)
+        }
+    }
+
+}
+
+// SmallProxy -> ImplementationA
+contract ImplementationA {
+    uint256 public value;
+
+    function setValue(uint256 newValue) public {
+        value = newValue;
+    }
+}
+
+contract ImplementationB {
+    uint256 public value;
+
+    function setValue(uint256 newValue) public {
+        value = newValue + 2;
+    }
+}
+
+// NOTE: Deploy this contract first
+contract B {
+    // NOTE: storage layout must be the same as contract A
+    uint256 public num;
+    address public sender;
+    uint256 public value;
+
+    function setVars(uint256 _num) public payable {
+        num = _num;
+        sender = msg.sender;
+        value = msg.value;
+    }
+}
+
+contract A {
+    uint256 public num;
+    address public sender;
+    uint256 public value;
+
+    function setVars(address _contract, uint256 _num) public payable {
+        // A's storage is set, B is not modified.
+        // (bool success, bytes memory data) = _contract.delegatecall(
+        (bool success,) = _contract.delegatecall(abi.encodeWithSignature("setVars(uint256)", _num));
+        if (!success) {
+            revert("delegatecall failed");
+        }
+    }
+}
